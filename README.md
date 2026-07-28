@@ -26,16 +26,17 @@ SiteGuard — отдельное веб-приложение для пассив
 Требуется Node.js 22.13 или новее.
 
 ```bash
-npm install
-npm run dev
+corepack enable
+pnpm install
+pnpm dev
 ```
 
 Проверка проекта:
 
 ```bash
-npm run typecheck
-npm test
-npm run build
+pnpm run typecheck
+pnpm test
+pnpm run build
 ```
 
 ## Ограничения
