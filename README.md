@@ -51,7 +51,6 @@ pnpm dev
 ```bash
 pnpm run typecheck
 pnpm test
-pnpm run build
 ```
 
 ## Ограничения

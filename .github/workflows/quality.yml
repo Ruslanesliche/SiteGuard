@@ -21,6 +21,6 @@ jobs:
       - run: corepack prepare pnpm@11.9.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
-      - run: pnpm test
       - run: pnpm run build
+      - run: pnpm run test:ci
       - run: pnpm audit --prod --audit-level high
