@@ -2,11 +2,9 @@ packages:
   - .
 
 allowBuilds:
-  esbuild: set this to true or false
-  unrs-resolver: set this to true or false
-  workerd: set this to true or false
-
-confirmModulesPurge: false
+  esbuild: true
+  unrs-resolver: true
+  workerd: true
 
 overrides:
   esbuild: 0.28.1
