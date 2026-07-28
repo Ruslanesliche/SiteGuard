@@ -138,7 +138,7 @@ export function ActiveAuditApp() {
       <>
         <header className="site-header compact">
           <a className="brand" href="/"><span>SG</span><strong>SiteGuard</strong></a>
-          <nav><a className="active-nav-return" href="/">Пассивная проверка</a><span className="header-status"><i /> Active</span></nav>
+          <nav><a className="active-nav-return" href="/active/api">API и права</a><a className="active-nav-return" href="/">Пассивная проверка</a><span className="header-status"><i /> Active</span></nav>
         </header>
         <ActiveReport report={report} onReset={() => { setReport(null); setError(""); }} />
       </>
@@ -149,7 +149,7 @@ export function ActiveAuditApp() {
     <>
       <header className="site-header compact">
         <a className="brand" href="/"><span>SG</span><strong>SiteGuard</strong></a>
-        <nav><a className="active-nav-return" href="/">Пассивная проверка</a><span className="header-status"><i /> Active</span></nav>
+        <nav><a className="active-nav-return" href="/active/api">API и права</a><a className="active-nav-return" href="/">Пассивная проверка</a><span className="header-status"><i /> Active</span></nav>
       </header>
       <main className="active-shell">
         <section className="active-intro">
@@ -236,6 +236,14 @@ export function ActiveAuditApp() {
           <article><span>02</span><strong>XSS-отражение</strong><p>Инертный HTML-маркер без JavaScript, обработчиков событий и эксплуатации.</p></article>
           <article><span>03</span><strong>CORS и методы</strong><p>OPTIONS с посторонним Origin и анализ разрешённых методов.</p></article>
           <article><span>04</span><strong>CSRF и вход</strong><p>Анализ публичных форм и признаков rate limiting без попыток авторизации.</p></article>
+        </section>
+        <section className="api-access-promo">
+          <div>
+            <span className="active-kicker">Новый отдельный модуль</span>
+            <h2>OpenAPI и права двух тестовых аккаунтов</h2>
+            <p>Импортируйте Swagger/OpenAPI и безопасно проверьте изоляцию объектов BOLA/IDOR только GET-запросами.</p>
+          </div>
+          <a className="button secondary" href="/active/api">Открыть API Access</a>
         </section>
       </main>
     </>

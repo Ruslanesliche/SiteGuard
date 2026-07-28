@@ -54,6 +54,16 @@ test("server-renders the separate active audit mode", async () => {
   assert.match(html, /SQL-инъекций/);
 });
 
+test("server-renders the separate OpenAPI access module", async () => {
+  const response = await render("/active/api");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Проверьте, видит ли один пользователь данные другого/);
+  assert.match(html, /Импорт OpenAPI/);
+  assert.match(html, /Bearer-токен тестового аккаунта A/);
+  assert.match(html, /Только GET из OpenAPI/);
+});
+
 test("active scan API requires same origin and ownership confirmation", async () => {
   const token = "siteguard-verify-0123456789abcdef0123456789abcdef";
   const wrongOrigin = await render("/api/active-scan", {
@@ -67,6 +77,34 @@ test("active scan API requires same origin and ownership confirmation", async ()
     method: "POST",
     headers: { origin: "https://siteguard.example", "content-type": "application/json" },
     body: JSON.stringify({ url: "https://example.com", verificationToken: token, confirmed: false }),
+  });
+  assert.equal(unconfirmed.status, 400);
+  assert.equal((await unconfirmed.json()).error, "ownership_confirmation_required");
+});
+
+test("OpenAPI API rejects cross-origin and unconfirmed requests", async () => {
+  const token = "siteguard-verify-0123456789abcdef0123456789abcdef";
+  const wrongOrigin = await render("/api/api-inventory", {
+    method: "POST",
+    headers: { origin: "https://attacker.example", "content-type": "application/json" },
+    body: JSON.stringify({
+      url: "https://example.com",
+      specificationLocation: "/openapi.json",
+      verificationToken: token,
+      confirmed: true,
+    }),
+  });
+  assert.equal(wrongOrigin.status, 403);
+
+  const unconfirmed = await render("/api/api-inventory", {
+    method: "POST",
+    headers: { origin: "https://siteguard.example", "content-type": "application/json" },
+    body: JSON.stringify({
+      url: "https://example.com",
+      specificationLocation: "/openapi.json",
+      verificationToken: token,
+      confirmed: false,
+    }),
   });
   assert.equal(unconfirmed.status, 400);
   assert.equal((await unconfirmed.json()).error, "ownership_confirmation_required");

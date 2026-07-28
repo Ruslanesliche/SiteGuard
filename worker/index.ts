@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { isValidVerificationToken, runActiveAudit } from "./active-audit.ts";
+import { importOpenApiInventory, runApiAccessAudit } from "./api-access-audit.ts";
 import { scanTarget } from "./scanner.ts";
 
 interface Env {
@@ -21,6 +22,7 @@ interface ExecutionContext {
 }
 
 const MAX_REQUEST_BYTES = 4_096;
+const MAX_ACCESS_REQUEST_BYTES = 12_288;
 const RATE_WINDOW_MS = 10 * 60 * 1_000;
 const RATE_LIMIT = 12;
 const MAX_RATE_BUCKETS = 5_000;
@@ -188,6 +190,139 @@ async function handleActiveScan(request: Request): Promise<Response> {
   }
 }
 
+async function readJsonBody(
+  request: Request,
+  limit: number,
+): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; response: Response }> {
+  if (request.method !== "POST") {
+    return { ok: false, response: json({ error: "method_not_allowed" }, 405, { allow: "POST" }) };
+  }
+  if (!sameOrigin(request)) {
+    return { ok: false, response: json({ error: "origin_mismatch", message: "Запрос отклонён." }, 403) };
+  }
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) {
+    return {
+      ok: false,
+      response: json({ error: "unsupported_media_type", message: "Ожидается JSON." }, 415),
+    };
+  }
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > limit) {
+    return {
+      ok: false,
+      response: json({ error: "request_too_large", message: "Запрос слишком большой." }, 413),
+    };
+  }
+  const retryAfter = rateLimit(request);
+  if (retryAfter) {
+    return {
+      ok: false,
+      response: json(
+        { error: "rate_limited", message: "Слишком много проверок API. Повторите позже." },
+        429,
+        { "retry-after": String(retryAfter) },
+      ),
+    };
+  }
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > limit) {
+    return {
+      ok: false,
+      response: json({ error: "request_too_large", message: "Запрос слишком большой." }, 413),
+    };
+  }
+  try {
+    const body = JSON.parse(raw) as unknown;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error("invalid");
+    }
+    return { ok: true, body: body as Record<string, unknown> };
+  } catch {
+    return {
+      ok: false,
+      response: json({ error: "invalid_json", message: "Некорректный JSON." }, 400),
+    };
+  }
+}
+
+function validateApiCommon(body: Record<string, unknown>): Response | null {
+  if (typeof body.url !== "string" || body.url.trim().length < 4) {
+    return json({ error: "invalid_url", message: "Введите URL сайта." }, 400);
+  }
+  if (!isValidVerificationToken(body.verificationToken)) {
+    return json({ error: "invalid_verification_token", message: "Токен подтверждения имеет неверный формат." }, 400);
+  }
+  if (body.confirmed !== true) {
+    return json({
+      error: "ownership_confirmation_required",
+      message: "Подтвердите владение сайтом и использование тестовых аккаунтов.",
+    }, 400);
+  }
+  if (typeof body.specificationLocation !== "string" || body.specificationLocation.length > 1_000) {
+    return json({ error: "invalid_openapi_url", message: "Укажите путь к OpenAPI JSON." }, 400);
+  }
+  return null;
+}
+
+function safeApiAccessError(error: unknown): string {
+  if (!(error instanceof Error)) return "Не удалось выполнить проверку API.";
+  const message = error.message.trim();
+  const expected =
+    /^(Введите|Токен|Тестовые|Для проверки|Подтверждение|Опубликуйте|Ответ|OpenAPI|Поддерживаются|В OpenAPI|Выбранный|Укажите|Оба|URL|API|Редирект|Не удалось|Слишком много|DNS|Домен|Локальные|Частные)/u;
+  return expected.test(message) && message.length <= 360
+    ? message
+    : "Не удалось выполнить проверку API. Проверьте OpenAPI, пути и тестовые токены.";
+}
+
+async function handleApiInventory(request: Request): Promise<Response> {
+  const parsed = await readJsonBody(request, MAX_REQUEST_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const invalid = validateApiCommon(parsed.body);
+  if (invalid) return invalid;
+  try {
+    return json(await importOpenApiInventory(
+      parsed.body.url as string,
+      parsed.body.specificationLocation as string,
+      parsed.body.verificationToken as string,
+    ));
+  } catch (error) {
+    return json({ error: "openapi_import_failed", message: safeApiAccessError(error) }, 422);
+  }
+}
+
+async function handleApiAccessScan(request: Request): Promise<Response> {
+  const parsed = await readJsonBody(request, MAX_ACCESS_REQUEST_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const invalid = validateApiCommon(parsed.body);
+  if (invalid) return invalid;
+  const requiredStrings = [
+    "endpointTemplate",
+    "accountAPath",
+    "accountBPath",
+    "accountAToken",
+    "accountBToken",
+  ] as const;
+  for (const field of requiredStrings) {
+    if (typeof parsed.body[field] !== "string") {
+      return json({ error: "invalid_api_access_input", message: "Заполните все поля проверки API." }, 400);
+    }
+  }
+  try {
+    return json(await runApiAccessAudit(
+      parsed.body.url as string,
+      parsed.body.specificationLocation as string,
+      parsed.body.endpointTemplate as string,
+      parsed.body.accountAPath as string,
+      parsed.body.accountBPath as string,
+      parsed.body.accountAToken as string,
+      parsed.body.accountBToken as string,
+      parsed.body.verificationToken as string,
+    ));
+  } catch (error) {
+    return json({ error: "api_access_scan_failed", message: safeApiAccessError(error) }, 422);
+  }
+}
+
 function secure(response: Response, api = false): Response {
   const secured = new Response(response.body, response);
   const headers = api ? API_SECURITY_HEADERS : PAGE_SECURITY_HEADERS;
@@ -201,6 +336,8 @@ const worker = {
 
     if (url.pathname === "/api/scan") return handleScan(request);
     if (url.pathname === "/api/active-scan") return handleActiveScan(request);
+    if (url.pathname === "/api/api-inventory") return handleApiInventory(request);
+    if (url.pathname === "/api/api-access-scan") return handleApiAccessScan(request);
     if (url.pathname === "/api/health") return json({ ok: true, service: "SiteGuard", version: 1 });
 
     if (url.pathname === "/_vinext/image") {

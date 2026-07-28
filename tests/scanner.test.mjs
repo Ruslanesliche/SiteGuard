@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { isValidVerificationToken, runActiveAudit } from "../worker/active-audit.ts";
+import { importOpenApiInventory, runApiAccessAudit } from "../worker/api-access-audit.ts";
 import { auditSite } from "../worker/site-audit.ts";
 import { isPrivateIp, normalizePublicUrl, parseGitHubRepository } from "../worker/url-safety.ts";
 
@@ -80,6 +81,94 @@ test("runs only verified, non-destructive active probes", async () => {
   assert.equal(report.findings.find((item) => item.id === "sql-error-signal")?.status, "pass");
   assert.equal(report.findings.find((item) => item.id === "csrf-forms")?.status, "pass");
   assert.equal(report.findings.find((item) => item.id === "auth-rate-limit")?.status, "pass");
+});
+
+test("imports a same-origin OpenAPI inventory after ownership verification", async () => {
+  const token = "siteguard-verify-0123456789abcdef0123456789abcdef";
+  const specification = {
+    openapi: "3.1.0",
+    info: { title: "Accounts API", version: "2.4.0" },
+    security: [{ bearerAuth: [] }],
+    paths: {
+      "/api/accounts/{id}": {
+        get: { summary: "Account details" },
+        patch: { summary: "Update account" },
+      },
+      "/health": {
+        get: { summary: "Health", security: [] },
+      },
+    },
+  };
+  const fetcher = async (input) => {
+    const url = new URL(input);
+    if (url.hostname === "cloudflare-dns.com") {
+      return Response.json({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] });
+    }
+    if (url.pathname === "/.well-known/siteguard-verification.txt") {
+      return new Response(token, { status: 200, headers: { "content-type": "text/plain" } });
+    }
+    if (url.pathname === "/openapi.json") {
+      return Response.json(specification);
+    }
+    return new Response("Not found", { status: 404 });
+  };
+
+  const report = await importOpenApiInventory("https://example.com", "/openapi.json", token, fetcher);
+  assert.equal(report.title, "Accounts API");
+  assert.equal(report.requests, 2);
+  assert.equal(report.endpoints.length, 3);
+  assert.equal(report.endpoints.find((item) => item.path === "/health")?.protected, false);
+  assert.equal(report.endpoints.find((item) => item.path === "/api/accounts/{id}")?.protected, true);
+});
+
+test("compares object access with two test accounts without exposing tokens", async () => {
+  const verificationToken = "siteguard-verify-0123456789abcdef0123456789abcdef";
+  const accountAToken = "test-account-a-token-123";
+  const accountBToken = "test-account-b-token-456";
+  const specification = {
+    openapi: "3.0.3",
+    info: { title: "Objects API", version: "1" },
+    paths: {
+      "/api/objects/{id}": {
+        get: { summary: "Read object", security: [{ bearerAuth: [] }] },
+      },
+    },
+  };
+  const fetcher = async (input, init = {}) => {
+    const url = new URL(input);
+    if (url.hostname === "cloudflare-dns.com") {
+      return Response.json({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] });
+    }
+    if (url.pathname === "/.well-known/siteguard-verification.txt") {
+      return new Response(verificationToken, { status: 200 });
+    }
+    if (url.pathname === "/openapi.json") return Response.json(specification);
+    const authorization = new Headers(init.headers).get("authorization");
+    if (!authorization) return Response.json({ error: "unauthorized" }, { status: 401 });
+    if (url.pathname === "/api/objects/101" && authorization === `Bearer ${accountAToken}`) {
+      return Response.json({ id: 101, owner: "a" });
+    }
+    if (url.pathname === "/api/objects/202" && authorization === `Bearer ${accountBToken}`) {
+      return Response.json({ id: 202, owner: "b" });
+    }
+    return Response.json({ error: "forbidden" }, { status: 403 });
+  };
+
+  const report = await runApiAccessAudit(
+    "https://example.com",
+    "/openapi.json",
+    "/api/objects/{id}",
+    "/api/objects/101",
+    "/api/objects/202",
+    accountAToken,
+    accountBToken,
+    verificationToken,
+    fetcher,
+  );
+  assert.equal(report.metrics.requests, 7);
+  assert.equal(report.findings.find((item) => item.id === "object-level-authorization")?.status, "pass");
+  assert.equal(JSON.stringify(report).includes(accountAToken), false);
+  assert.equal(JSON.stringify(report).includes(accountBToken), false);
 });
 
 test("detects missing headers, mixed content and dangerous DOM execution", () => {
