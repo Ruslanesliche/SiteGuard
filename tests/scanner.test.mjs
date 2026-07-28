@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { isValidVerificationToken, runActiveAudit } from "../worker/active-audit.ts";
 import { auditSite } from "../worker/site-audit.ts";
 import { isPrivateIp, normalizePublicUrl, parseGitHubRepository } from "../worker/url-safety.ts";
 
@@ -34,6 +35,51 @@ test("accepts only canonical public GitHub repository URLs", () => {
   });
   assert.throws(() => parseGitHubRepository("https://gitlab.com/openai/openai-node"));
   assert.throws(() => parseGitHubRepository("https://github.com/openai/openai-node/issues"));
+});
+
+test("requires a high-entropy ownership verification token for active scans", () => {
+  assert.equal(isValidVerificationToken("siteguard-verify-0123456789abcdef0123456789abcdef"), true);
+  assert.equal(isValidVerificationToken("siteguard-verify-short"), false);
+  assert.equal(isValidVerificationToken("0123456789abcdef0123456789abcdef"), false);
+});
+
+test("runs only verified, non-destructive active probes", async () => {
+  const token = "siteguard-verify-0123456789abcdef0123456789abcdef";
+  const fetcher = async (input, init = {}) => {
+    const url = new URL(input);
+    if (url.hostname === "cloudflare-dns.com") {
+      return Response.json({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] });
+    }
+    if (url.pathname === "/.well-known/siteguard-verification.txt") {
+      return new Response(token, { status: 200, headers: { "content-type": "text/plain" } });
+    }
+    if (init.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: { allow: "GET, HEAD, OPTIONS" },
+      });
+    }
+    const html = `
+      <!doctype html><form method="post">
+        <input type="hidden" name="csrf_token" value="safe">
+        <input type="password" name="password">
+      </form>`;
+    return new Response(html, {
+      status: 200,
+      headers: {
+        "content-type": "text/html",
+        "ratelimit-limit": "20",
+      },
+    });
+  };
+
+  const report = await runActiveAudit("https://example.com/login", token, fetcher);
+  assert.equal(report.mode, "authorized-safe-active");
+  assert.equal(report.metrics.requests, 5);
+  assert.equal(report.findings.find((item) => item.id === "ownership")?.status, "pass");
+  assert.equal(report.findings.find((item) => item.id === "sql-error-signal")?.status, "pass");
+  assert.equal(report.findings.find((item) => item.id === "csrf-forms")?.status, "pass");
+  assert.equal(report.findings.find((item) => item.id === "auth-rate-limit")?.status, "pass");
 });
 
 test("detects missing headers, mixed content and dangerous DOM execution", () => {

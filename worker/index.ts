@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for SiteGuard. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { isValidVerificationToken, runActiveAudit } from "./active-audit.ts";
 import { scanTarget } from "./scanner.ts";
 
 interface Env {
@@ -129,6 +130,64 @@ async function handleScan(request: Request): Promise<Response> {
   }
 }
 
+function safeActiveError(error: unknown): string {
+  if (!(error instanceof Error)) return "Не удалось выполнить активную проверку.";
+  const message = error.message.trim();
+  const expected = /^(Введите|Токен|Подтверждение|Опубликуйте|Ответ|Редирект|Сайт|Не удалось|Слишком много|DNS|Домен|Локальные|Частные|URL)/u;
+  return expected.test(message) && message.length <= 320
+    ? message
+    : "Не удалось выполнить активную проверку. Проверьте URL и файл подтверждения.";
+}
+
+async function handleActiveScan(request: Request): Promise<Response> {
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, { allow: "POST" });
+  if (!sameOrigin(request)) return json({ error: "origin_mismatch", message: "Запрос отклонён." }, 403);
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) {
+    return json({ error: "unsupported_media_type", message: "Ожидается JSON." }, 415);
+  }
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > MAX_REQUEST_BYTES) {
+    return json({ error: "request_too_large", message: "Запрос слишком большой." }, 413);
+  }
+  const retryAfter = rateLimit(request);
+  if (retryAfter) {
+    return json(
+      { error: "rate_limited", message: "Слишком много активных проверок. Повторите позже." },
+      429,
+      { "retry-after": String(retryAfter) },
+    );
+  }
+
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_REQUEST_BYTES) {
+    return json({ error: "request_too_large", message: "Запрос слишком большой." }, 413);
+  }
+  let body: { url?: unknown; verificationToken?: unknown; confirmed?: unknown };
+  try {
+    body = JSON.parse(raw) as { url?: unknown; verificationToken?: unknown; confirmed?: unknown };
+  } catch {
+    return json({ error: "invalid_json", message: "Некорректный JSON." }, 400);
+  }
+  if (typeof body.url !== "string" || body.url.trim().length < 4) {
+    return json({ error: "invalid_url", message: "Введите URL сайта." }, 400);
+  }
+  if (!isValidVerificationToken(body.verificationToken)) {
+    return json({ error: "invalid_verification_token", message: "Токен подтверждения имеет неверный формат." }, 400);
+  }
+  if (body.confirmed !== true) {
+    return json({
+      error: "ownership_confirmation_required",
+      message: "Подтвердите, что вы владеете сайтом или имеете разрешение на проверку.",
+    }, 400);
+  }
+
+  try {
+    return json(await runActiveAudit(body.url, body.verificationToken));
+  } catch (error) {
+    return json({ error: "active_scan_failed", message: safeActiveError(error) }, 422);
+  }
+}
+
 function secure(response: Response, api = false): Response {
   const secured = new Response(response.body, response);
   const headers = api ? API_SECURITY_HEADERS : PAGE_SECURITY_HEADERS;
@@ -141,6 +200,7 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/scan") return handleScan(request);
+    if (url.pathname === "/api/active-scan") return handleActiveScan(request);
     if (url.pathname === "/api/health") return json({ ok: true, service: "SiteGuard", version: 1 });
 
     if (url.pathname === "/_vinext/image") {

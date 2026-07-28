@@ -364,6 +364,7 @@ function Header({ compact = false }: { compact?: boolean }) {
       <a className="brand" href="/" aria-label="SiteGuard — главная"><span>SG</span><strong>SiteGuard</strong></a>
       <nav aria-label="Основная навигация">
         {!compact && <><a href="#coverage">Проверки</a><a href="#method">Методика</a></>}
+        <a className="active-nav-link" href="/active">Активная проверка</a>
         <span className="header-status"><i /> Сервис готов</span>
       </nav>
     </header>
