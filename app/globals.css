@@ -149,6 +149,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .scan-progress > div span { display: block; height: 100%; background: var(--lime); transition: width .5s ease; }
 .scan-progress p { display: flex; align-items: center; gap: 9px; margin: 10px 0 0; color: #bdcac5; font-size: 13px; }
 .form-error { margin-top: 16px; padding: 13px 15px; background: rgba(198,64,64,.18); border: 1px solid rgba(255,120,120,.25); border-radius: 12px; color: #ffd6d1; font-size: 14px; line-height: 1.5; }
+.fragment-note { margin: 10px 3px 0; padding: 10px 12px; background: rgba(167, 255, 93, .08); border: 1px solid rgba(167, 255, 93, .18); border-radius: 10px; color: #b9c8c1; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.fragment-note strong { color: #e5efe9; font-weight: 650; }
 .form-note { margin: 17px 4px 0; color: #7f928a; font-size: 11px; line-height: 1.5; text-align: center; }
 
 .coverage, .method, .results-shell {

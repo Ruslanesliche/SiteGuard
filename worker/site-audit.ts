@@ -3,7 +3,7 @@ import { assertPublicDns, normalizePublicUrl } from "./url-safety.ts";
 
 const MAX_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 5;
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 25_000;
 const TRACKER_HOSTS = [
   "google-analytics.com",
   "googletagmanager.com",
@@ -62,7 +62,11 @@ async function fetchWithTimeout(url: URL, fetcher: typeof fetch): Promise<Respon
       },
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw new Error("Сайт не ответил за 12 секунд.");
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        "Сайт не ответил за 25 секунд. Он может запускаться после простоя, требовать вход или блокировать автоматические запросы.",
+      );
+    }
     throw new Error("Не удалось подключиться к сайту.");
   } finally {
     clearTimeout(timeout);

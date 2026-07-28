@@ -201,6 +201,18 @@ export function SiteGuardApp() {
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState(0);
   const [error, setError] = useState("");
+  const fragmentTarget = useMemo(() => {
+    const value = url.trim();
+    if (!value.includes("#")) return "";
+    try {
+      const parsed = new URL(/^[a-z][a-z\d+.-]*:\/\//iu.test(value) ? value : `https://${value}`);
+      if (!parsed.hash) return "";
+      parsed.hash = "";
+      return parsed.toString();
+    } catch {
+      return "";
+    }
+  }, [url]);
 
   useEffect(() => {
     if (!loading) return;
@@ -277,6 +289,11 @@ export function SiteGuardApp() {
                   disabled={loading}
                 />
               </label>
+              {fragmentTarget && (
+                <p className="fragment-note">
+                  Часть адреса после # работает только в браузере. SiteGuard проверит публичный ответ: <strong>{fragmentTarget}</strong>
+                </p>
+              )}
               <label>
                 <span>Публичный GitHub <small>необязательно</small></span>
                 <input

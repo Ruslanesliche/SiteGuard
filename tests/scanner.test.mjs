@@ -20,6 +20,10 @@ test("blocks private, local, credentialed and non-web targets", () => {
   assert.equal(isPrivateIp("10.2.3.4"), true);
   assert.equal(isPrivateIp("93.184.216.34"), false);
   assert.equal(normalizePublicUrl("example.com").toString(), "https://example.com/");
+  assert.equal(
+    normalizePublicUrl("https://example.com/#/settings").toString(),
+    "https://example.com/",
+  );
 });
 
 test("accepts only canonical public GitHub repository URLs", () => {
